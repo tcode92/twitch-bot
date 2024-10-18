@@ -1,11 +1,12 @@
 package bot
 
 import (
-	"bot/cmd/ws"
 	"fmt"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/tcode92/twitch-bot/ws"
 )
 
 func (b *Bot) Connect() chan interface{} {

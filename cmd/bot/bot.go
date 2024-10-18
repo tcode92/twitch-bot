@@ -1,6 +1,6 @@
 package bot
 
-import "bot/cmd/ws"
+import "github.com/tcode92/twitch-bot/ws"
 
 type Bot struct {
 	OnMessage     func(message ChatMsg)

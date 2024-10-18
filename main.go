@@ -1,10 +1,11 @@
 package main
 
 import (
-	"bot/cmd/bot"
-	"bot/cmd/twitch"
 	"os"
 	"strings"
+
+	"github.com/tcode92/twitch-bot/cmd/bot"
+	"github.com/tcode92/twitch-bot/cmd/twitch"
 )
 
 func main() {

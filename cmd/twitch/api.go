@@ -1,6 +1,6 @@
 package twitch
 
-import "bot/cmd/bot"
+import "github.com/tcode92/twitch-bot/cmd/bot"
 
 type TwitchApi struct {
 	env *bot.Env
