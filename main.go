@@ -53,7 +53,7 @@ func main() {
 	<-exit
 }
 
-var kappas = []string{"Kappa", "KappaPride", "KappaClaus", "KappaRoss", "KappaWealth", "Keepo"}
+var kappas = []string{"Kappa", "KappaPride", "KappaClaus", "KappaRoss", "KappaWealth", "Keepo", "DarkMode"}
 
 func isKappa(str string) bool {
 	for _, v := range kappas {

@@ -30,7 +30,7 @@ type Client struct {
 	OnPing          func()
 	OnPong          func()
 	OnDisconnect    func()
-	Conn            net.Conn
+	conn            net.Conn
 	closeChan       chan error
 }
 
@@ -41,18 +41,14 @@ func NewClient(wsUrl string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	if u.Scheme != "ws" && u.Scheme != "wss" {
 		return nil, errors.New(`invalid url schema: expected "ws" or "wss"`)
 	}
 
-	// return client
-	c := &Client{
+	return &Client{
 		url:       u,
 		closeChan: make(chan error),
-	}
-
-	return c, nil
+	}, nil
 }
 
 // initialize the connection with the server
@@ -69,17 +65,14 @@ func (c *Client) Connect() error {
 			"Sec-WebSocket-Key: %s\r\n"+
 			"Sec-WebSocket-Version: 13\r\n"+
 			"\r\n", c.url.Path, c.url.Host, webSecKey)
+
 	// connect to the server
 	var conn net.Conn
 	var err error
 	if c.url.Scheme == "wss" {
-		tlsConfig := &tls.Config{
-			InsecureSkipVerify: false,
-		}
-		conn, err = tls.Dial("tcp", c.url.Host, tlsConfig)
+		conn, err = tls.Dial("tcp", c.url.Host, &tls.Config{})
 	} else {
 		conn, err = net.Dial("tcp", c.url.Host)
-
 	}
 	if err != nil {
 		conn.Close()
@@ -101,20 +94,20 @@ func (c *Client) Connect() error {
 		// maybe return our own errors?
 		return err
 	}
+
+	// validate accept key
 	acceptKey, err := getAcceptKeyFromHeaders(string(response))
 	if err != nil {
 		conn.Close()
 		return err
 	}
-
-	// validate accept key
 	if acceptKey != computeAcceptKey(webSecKey) {
 		conn.Close()
 		return errors.New("recived invalid accept key")
 	}
 
 	// set the connection on client
-	c.Conn = conn
+	c.conn = conn
 
 	// handle incoming messages
 	go c.handleIncomingMessages()
@@ -124,30 +117,29 @@ func (c *Client) Connect() error {
 
 // closes the tcp connection
 func (c *Client) Close() {
-	if c.Conn != nil {
+	if c.conn != nil {
 		// send signal to chan
 		c.closeChan <- nil
 		// close the channel
+		// TODO: Connection close flow can be improved
 		close(c.closeChan)
-
-		// the connection should be closed bye the goroutine
-
-		// set conection to nil
-		c.Conn = nil
-
+		c.conn = nil
 	}
 }
 
+// Send Text message
 func (c *Client) SendText(t string) error {
-	// text is bytes anyway, we convert it to byets and call send
 	return c.send([]byte(t), TextOpcode)
 }
 
+// Send raw bytes
 func (c *Client) SendBytes(b []byte) error {
 	return c.send(b, BinaryOpcode)
-
 }
 
+// Send JSON payload
+//
+// Marshal the interface and sends it as text message
 func (c *Client) SendJson(data interface{ any }) error {
 	// marshal json and send the message
 	var j []byte
@@ -158,6 +150,9 @@ func (c *Client) SendJson(data interface{ any }) error {
 	return c.send(j, TextOpcode)
 }
 
+// Send JSON payload
+//
+// Marshal the interface and sends it as binary message
 func (c *Client) SendJsonBin(data interface{ any }) error {
 	// marshal json and send the message
 	var j []byte
@@ -168,39 +163,31 @@ func (c *Client) SendJsonBin(data interface{ any }) error {
 	return c.send(j, BinaryOpcode)
 }
 
-// opcode can be "t" for text and "b" for binary
-// should we ignore text and send all data as binary anyway?
-// i think it's required and correct to send the correct opcode to server/client so they can handle them accordingly
+// send the byte in the given opcode
 func (c *Client) send(b []byte, opcode byte) error {
 	payloadLen := len(b)
-	// should we send chunked messages?
-
 	var frameSize = 0
 	payloadStart := 0
+
+	// determin frame size based on payload
 	if payloadLen < 126 {
-		// payload size is <= 125 so we have
-		// 1byte for fin+reserved
-		// 1byte for mask(bit) and payload length
-		// 4byte for mask (32bit)
-		// and the payload data
 		frameSize = 6 + payloadLen
 	} else if payloadLen == 126 {
-		// same as above but we have 2 extra bytes to write the payload length
 		frameSize = 8 + payloadLen
 	} else {
-		// same as above but we have 8 extra bytes to write the payload length
 		frameSize = 14 + payloadLen
 	}
 	payload := make([]byte, frameSize)
+
 	// write first byte fin+opcode
 	if opcode == TextOpcode {
 		payload[0] = 0b10000001
 	} else {
 		payload[0] = 0b10000010
 	}
+
 	// set mask and payload length
 	mask := getMaskKey()
-
 	if payloadLen < 126 {
 		// len
 		payload[1] = 0b10000000 | byte(payloadLen)
@@ -227,12 +214,14 @@ func (c *Client) send(b []byte, opcode byte) error {
 		payload[payloadStart+i] = data ^ mask[i%4]
 	}
 	// write the frame to the connection
-	_, err := c.Conn.Write(payload)
+	_, err := c.conn.Write(payload)
 	if err != nil {
 		return err
 	}
 	return nil
 }
+
+// Ping message hardcoded
 func (c *Client) SendPing() error {
 	m := getMaskKey()
 	pingMsg := []byte{
@@ -241,12 +230,14 @@ func (c *Client) SendPing() error {
 		m[0], m[1], m[2], m[3], // mask
 		0b1010000 ^ m[0], 0b1101001 ^ m[1], 0b1101110 ^ m[2], 0b1100111 ^ m[3], // "Ping" payload masked
 	}
-	_, err := c.Conn.Write(pingMsg)
+	_, err := c.conn.Write(pingMsg)
 	if err != nil {
 		return err
 	}
 	return nil
 }
+
+// Pong message hardcoded
 func (c *Client) SendPong() error {
 	mask := getMaskKey()
 	pongMsg := []byte{
@@ -255,7 +246,7 @@ func (c *Client) SendPong() error {
 		mask[0], mask[1], mask[2], mask[3], // Mask
 		0b1010000, 0b1101111, 0b1101110, 0b1100111, // "Pong" payload
 	}
-	_, err := c.Conn.Write(pongMsg)
+	_, err := c.conn.Write(pongMsg)
 	if err != nil {
 		return err
 	}
@@ -309,13 +300,9 @@ func getAcceptKeyFromHeaders(headers string) (string, error) {
 		return "", fmt.Errorf("invalid status: expected 101 recived %s", status)
 	}
 	var secAcceptKey string
-	for i, header := range lines {
-		// we parsed the first line already
-		if i == 0 {
-			continue
-		}
-		if strings.HasPrefix(header, "Sec-WebSocket-Accept: ") {
-			secAcceptKey = strings.TrimSpace(strings.TrimPrefix(header, "Sec-WebSocket-Accept: "))
+	for i := 1; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "Sec-WebSocket-Accept: ") {
+			secAcceptKey = strings.TrimSpace(strings.TrimPrefix(lines[i], "Sec-WebSocket-Accept: "))
 			break
 		}
 	}
@@ -325,47 +312,30 @@ func getAcceptKeyFromHeaders(headers string) (string, error) {
 	return secAcceptKey, nil
 }
 
-// client default ping and pong functions
-// user can implement them if he wants to
-// they are not required.
-
-// needs implementation
-
-// lets se if i can calculate hexadecimal by hand
-
-// what is the value in bits and int for 0x7D
-
-// 15 14 13 12 11 10 9  8  7  6  5   4   3   2   1  0
-// F  E  D  C  B  A  9  8  7  6  5   4   3   2   1  0
-//       1                 1
-//	13 x 16^1    +    7 x 16^0     =  125 (seems easy)
-
 func (c *Client) handleIncomingMessages() {
 	defer func() {
-		if c.Conn != nil {
+		if c.conn != nil {
 			c.OnDisconnect()
-			c.Conn.Close()
+			c.conn.Close()
 		}
 		close(c.closeChan)
 	}()
 	var message bytes.Buffer
 	var opcode uint8
-	conn := c.Conn
-messageHandler:
+
 	for {
 		select {
 		case err := <-c.closeChan:
 			{
 				if err != nil {
-					// error occured
 					println(err)
 				}
-				break messageHandler
+				return
 			}
 		default:
 			// read first 2 bytes to determin message type and length
 			header := make([]byte, 2)
-			_, err := conn.Read(header)
+			_, err := c.conn.Read(header)
 			if err != nil {
 				// if err is EOF that means that the server closed the connection. we should return.
 				if err == io.EOF {
@@ -376,15 +346,16 @@ messageHandler:
 				c.closeChan <- err
 				return
 			}
-			fin := (header[0] & 0b10000000) != 0
-			frameOpcode := header[0] & 0b00001111 // current frame's opcode
 
-			// If this is the first frame of the message, set the opcode
+			fin := (header[0] & 0b10000000) != 0
+			frameOpcode := header[0] & 0b00001111 // current frame opcode
+
+			// set the opcode if it's the first frame
 			if opcode == 0 && frameOpcode != ContinuationOpcode {
 				opcode = frameOpcode
 			}
 
-			// If it's not a continuation frame, but we're already processing a fragmented message, it's an error
+			// check if the opcode is valid for fragmented message
 			if frameOpcode != ContinuationOpcode && opcode != frameOpcode {
 				println("Received fragmented message with mismatched opcodes")
 				return
@@ -392,7 +363,6 @@ messageHandler:
 
 			// close connection if mask is set, server should always send unmasked frames.
 			if (header[1] & 0b10000000) != 0 {
-				// break will exit the loop and defer conn.Close() is called.
 				return
 			}
 
@@ -403,7 +373,7 @@ messageHandler:
 			if payloadLen == 126 {
 				// payload length is extended to the next 2 byets
 				extended := make([]byte, 2)
-				_, err := conn.Read(extended)
+				_, err := c.conn.Read(extended)
 				if err != nil {
 					// error reading from the connection, should close.
 					println("Error reading from the connection", err)
@@ -413,7 +383,7 @@ messageHandler:
 			} else if payloadLen == 127 {
 				// payload length is extended to the next 8 byets
 				extended := make([]byte, 8)
-				_, err := conn.Read(extended)
+				_, err := c.conn.Read(extended)
 				if err != nil {
 					// error reading from the connection, should close.
 					println("Error reading from the connection", err)
@@ -424,7 +394,7 @@ messageHandler:
 
 			// read payload
 			p := make([]byte, payloadLen)
-			_, err = conn.Read(p)
+			_, err = c.conn.Read(p)
 			if err != nil {
 				// error reading from the connection, should close.
 				println("Error reading from the connection", err)
@@ -439,7 +409,6 @@ messageHandler:
 
 			if fin {
 				buffer := message.Bytes()
-				// based on opcode call the specific user callback
 
 				switch opcode {
 				case TextOpcode:
@@ -453,7 +422,6 @@ messageHandler:
 				case PingOpcode:
 					c.SendPong()
 				case PongOpcode:
-					// Handle pong response, if needed
 					fmt.Println("Recived pong")
 				default:
 					fmt.Println("Unknown opcode:", opcode)
