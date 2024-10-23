@@ -44,7 +44,7 @@ By default, the bot will look for the `.env` file in the current directory. It w
 To run the bot:
 
 ```bash
-bot
+twitchbot
 ```
 
 ### Custom Environment File Path
@@ -52,7 +52,7 @@ bot
 You can specify a custom environment file for the bot using the `--env` flag:
 
 ```bash
-bot --env <env/path>
+twitchbot --env <env/path>
 ```
 
 In this case, the bot will look for the user `.env` file using the `DEFAULT_USER` variable in the specified environment file.
@@ -62,7 +62,7 @@ In this case, the bot will look for the user `.env` file using the `DEFAULT_USER
 To specify a custom user environment file, use the `--user` flag:
 
 ```bash
-bot --user <user/env/path>
+twitchbot --user <user/env/path>
 ```
 
 ### Full Custom Run
@@ -70,7 +70,7 @@ bot --user <user/env/path>
 To run the bot with both custom environment and user files, use both `--env` and `--user` flags:
 
 ```bash
-bot --env <env/path> --user <user/env/path>
+twitchbot --env <env/path> --user <user/env/path>
 ```
 
 Make sure both the application and user `.env` files are configured correctly before running the bot.
