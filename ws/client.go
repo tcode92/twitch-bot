@@ -75,7 +75,7 @@ func (c *Client) Connect() error {
 		conn, err = net.Dial("tcp", c.url.Host)
 	}
 	if err != nil {
-		conn.Close()
+		println("error in dial", err.Error())
 		return fmt.Errorf("error in dial: %w", err)
 	}
 
@@ -301,8 +301,12 @@ func getAcceptKeyFromHeaders(headers string) (string, error) {
 	}
 	var secAcceptKey string
 	for i := 1; i < len(lines); i++ {
-		if strings.HasPrefix(lines[i], "Sec-WebSocket-Accept: ") {
-			secAcceptKey = strings.TrimSpace(strings.TrimPrefix(lines[i], "Sec-WebSocket-Accept: "))
+		header := strings.Split(lines[i], ":")
+		if len(header) < 2 {
+			continue
+		}
+		if strings.TrimSpace(strings.ToLower(header[0])) == "sec-websocket-accept" {
+			secAcceptKey = strings.TrimSpace(header[1])
 			break
 		}
 	}
@@ -356,10 +360,10 @@ func (c *Client) handleIncomingMessages() {
 			}
 
 			// check if the opcode is valid for fragmented message
-			if frameOpcode != ContinuationOpcode && opcode != frameOpcode {
+			/* if frameOpcode != ContinuationOpcode && opcode != frameOpcode {
 				println("Received fragmented message with mismatched opcodes")
 				return
-			}
+			} */
 
 			// close connection if mask is set, server should always send unmasked frames.
 			if (header[1] & 0b10000000) != 0 {
@@ -422,7 +426,9 @@ func (c *Client) handleIncomingMessages() {
 				case PingOpcode:
 					c.SendPong()
 				case PongOpcode:
-					fmt.Println("Recived pong")
+					if c.OnPong != nil {
+						c.OnPong()
+					}
 				default:
 					fmt.Println("Unknown opcode:", opcode)
 				}
